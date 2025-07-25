@@ -15,7 +15,7 @@ A web application for securely storing, managing, and sharing medical records.
 
 - **Frontend:** React, TypeScript, Tailwind CSS
 - **Backend:** Node.js, Express
-- **Database:** (Specify your DB, e.g., MySQL, PostgreSQL)
+- **Database:** PostgreSQL
 - **Other:** JWT for authentication
 
 ## Getting Started
