@@ -18,13 +18,13 @@ const Footer = () => {
               making healthcare information accessible when you need it most.
             </p>
             <div className="mt-4 flex space-x-4">
-              <a href="#" className="text-gray-400 hover:text-medical-blue transition-colors">
+              <a className="text-gray-400 hover:text-medical-blue transition-colors">
                 <Github size={20} />
               </a>
-              <a href="#" className="text-gray-400 hover:text-medical-blue transition-colors">
+              <a className="text-gray-400 hover:text-medical-blue transition-colors">
                 <Twitter size={20} />
               </a>
-              <a href="#" className="text-gray-400 hover:text-medical-blue transition-colors">
+              <a className="text-gray-400 hover:text-medical-blue transition-colors">
                 <Linkedin size={20} />
               </a>
             </div>
@@ -67,11 +67,6 @@ const Footer = () => {
               <li>
                 <Link to="/terms" className="text-sm text-gray-600 hover:text-medical-blue">
                   Terms
-                </Link>
-              </li>
-              <li>
-                <Link to="/contact" className="text-sm text-gray-600 hover:text-medical-blue">
-                  Contact
                 </Link>
               </li>
             </ul>

@@ -30,6 +30,7 @@ const API_BASE_URL = 'http://localhost:5000/api';
 interface RecordsContextType {
   records: MedicalRecord[];
   addRecord: (record: Omit<MedicalRecord, 'id' | 'created_at'>) => Promise<void>;
+  deleteRecord: (id: number) => Promise<void>;
   getUserRecords: (patientId: string) => Promise<MedicalRecord[]>;
   getPathlabRecords: (labId: number) => Promise<MedicalRecord[]>;
   getPatientRecords: (patientId: string) => Promise<MedicalRecord[]>;
@@ -166,6 +167,20 @@ export const RecordsProvider: React.FC<RecordsProviderProps> = ({ children }) =>
     }
   };
 
+  // Delete a record by ID
+  const deleteRecord = async (id: number) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/records/${id}`);
+      
+      // Remove the record from state
+      setRecords(prevRecords => prevRecords.filter(record => record.id !== id));
+    } catch (err) {
+      console.error('Error deleting record:', err);
+      setError('Failed to delete record. Please try again later.');
+      throw new Error('Failed to delete record');
+    }
+  };
+
   // Get user records by patient ID
   const getUserRecords = async (patientId: string): Promise<MedicalRecord[]> => {
     try {
@@ -231,6 +246,7 @@ export const RecordsProvider: React.FC<RecordsProviderProps> = ({ children }) =>
     <RecordsContext.Provider value={{ 
       records, 
       addRecord, 
+      deleteRecord,
       getUserRecords, 
       getPathlabRecords,
       getPatientRecords,

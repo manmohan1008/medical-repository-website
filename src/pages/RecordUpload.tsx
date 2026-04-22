@@ -65,19 +65,28 @@ const RecordUpload = () => {
     type: '',
     category: '',
     notes: '',
-    patient_id: '', // For pathlab records
+    patient_email: '', // For pathlab records
+    patient_id: '', // Hidden internal patient identifier after verification
   });
 
-  // Verify patient ID when entered by lab
+  // Verify patient by email when entered by lab
   const verifyPatient = async () => {
-    if (!formData.patient_id) return;
-    
-    console.log('Patient ID being sent:', formData.patient_id);
+    if (!formData.patient_email) {
+      setPatientInfo(null);
+      setFormData((prevState) => ({ ...prevState, patient_id: '' }));
+      return;
+    }
 
     try {
-      const response = await axios.get(`http://localhost:5000/api/patients/verify/${formData.patient_id}`);
+      const response = await axios.get('http://localhost:5000/api/patients/verify', {
+        params: { email: formData.patient_email }
+      });
       console.log('Patient verification response:', response.data);
       setPatientInfo(response.data);
+      setFormData((prevState) => ({
+        ...prevState,
+        patient_id: response.data.patient_id,
+      }));
       
       toast({
         title: "Patient Verified",
@@ -86,19 +95,20 @@ const RecordUpload = () => {
       });
     } catch (error) {
       setPatientInfo(null);
+      setFormData((prevState) => ({ ...prevState, patient_id: '' }));
       toast({
         title: "Patient Not Found",
-        description: "Please check the patient ID",
+        description: "Please check the patient email",
         variant: "destructive"
       });
     }
   };
 
   useEffect(() => {
-    if (formData.patient_id && userRole === 'pathlab') {
+    if (formData.patient_email && userRole === 'pathlab') {
       verifyPatient();
     }
-  }, [formData.patient_id]);
+  }, [formData.patient_email]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -118,10 +128,19 @@ const RecordUpload = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (userRole === 'pathlab' && !formData.patient_email) {
+      toast({
+        title: "Patient Email Required",
+        description: "Please enter the patient's registered email to link this report.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     if (userRole === 'pathlab' && !formData.patient_id) {
       toast({
-        title: "Patient ID Required",
-        description: "Please enter the patient ID to link this report.",
+        title: "Patient Not Verified",
+        description: "Please enter a registered patient email and verify it.",
         variant: "destructive"
       });
       return;
@@ -141,19 +160,26 @@ const RecordUpload = () => {
     console.log('Payload being sent:', newRecord);
 
     const formDataToSend = new FormData();
+    // Append only defined and non-null values to avoid sending the string 'undefined'
     Object.entries(newRecord).forEach(([key, value]) => {
-      formDataToSend.append(key, value as string);
+      if (value !== undefined && value !== null) {
+        formDataToSend.append(key, String(value));
+      }
     });
+
     if (selectedFile) {
       formDataToSend.append('file', selectedFile);
     }
 
-    console.log('FormData being sent:', formDataToSend); // Debugging
+    // Debug: print out FormData entries so we can inspect what's sent (useful during development)
+    for (const pair of formDataToSend.entries()) {
+      // eslint-disable-next-line no-console
+      console.log('formData key:', pair[0], 'value:', pair[1]);
+    }
 
     try {
-      await axios.post('http://localhost:5000/api/records', formDataToSend, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Let the browser set the Content-Type (including boundary). Do not force 'multipart/form-data' header.
+      await axios.post('http://localhost:5000/api/records', formDataToSend);
 
       toast({
         title: userRole === 'pathlab' ? "Lab Report Uploaded" : "Medical Record Added",
@@ -210,22 +236,27 @@ const RecordUpload = () => {
                 <div className="space-y-4">
                   {userRole === 'pathlab' && (
                     <div>
-                      <Label htmlFor="patientId" className="flex items-center text-gray-900">
+                      <Label htmlFor="patientEmail" className="flex items-center text-gray-900">
                         <User size={16} className="mr-2 text-medical-blue" />
-                        Patient ID <span className="text-red-500 ml-1">*</span>
+                        Patient Email <span className="text-red-500 ml-1">*</span>
                       </Label>
                       <Input
-                        id="patientId"
-                        name="patient_id"
-                        placeholder="e.g., P12345"
-                        value={formData.patient_id}
+                        id="patientEmail"
+                        name="patient_email"
+                        placeholder="e.g., patient@example.com"
+                        value={formData.patient_email}
                         onChange={handleInputChange}
                         required
                         className="mt-1"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Enter the patient's unique ID to link this report to their account
+                        Enter the patient's registered email. The patient's name will appear below if found.
                       </p>
+                      {patientInfo && (
+                        <p className="mt-3 text-sm text-gray-700">
+                          Verified patient: <span className="font-semibold">{patientInfo.first_name} {patientInfo.last_name}</span>
+                        </p>
+                      )}
                     </div>
                   )}
 

@@ -7,15 +7,12 @@ import { Card } from '@/components/ui/CustomCard';
 import { MedicalRecord, useRecords } from '@/contexts/RecordsContext';
 import { useToast } from '@/hooks/use-toast';
 import { motion } from 'framer-motion';
-import { Activity, ArrowUpRight, BarChart, Calendar, Clock, Download, Eye, FilePlus2, FileText, Plus, UserRound } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowUpRight, BarChart as BarChartIcon, Calendar, Download, Eye, FilePlus2, FileText, UserRound } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+// if using types
+// import { MedicalRecord } from "../types/MedicalRecord"; // adjust path if needed
 import { Link } from 'react-router-dom';
-
-// Mock Data for Dashboard
-const upcomingAppointments = [
-  { id: 1, title: 'Dental Checkup', date: '2024-01-15', time: '10:00 AM', doctor: 'Dr. James Wilson' },
-  { id: 2, title: 'Eye Examination', date: '2024-01-28', time: '2:30 PM', doctor: 'Dr. Patricia Miller' },
-];
 
 const Dashboard = () => {
   const { toast } = useToast();
@@ -26,6 +23,61 @@ const Dashboard = () => {
   const { getCurrentUserRecords } = useRecords();
   const { getPatientRecords } = useRecords();
   const [patientRecords, setPatientRecords] = useState([]);
+  const [predictionsMap, setPredictionsMap] = useState<Record<string, any>>({}); 
+  const [loadingPredictions, setLoadingPredictions] = useState<boolean>(false);
+  const [patientPrediction, setPatientPrediction] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Record<string, any>>({});
+  const [analysisLoading, setAnalysisLoading] = useState<Record<string, boolean>>({});
+  const [labChartView, setLabChartView] = useState<'daily' | 'monthly'>('daily');
+
+  // Function to load existing predictions from database
+  const loadExistingPredictions = async (records: MedicalRecord[], role: string | null) => {
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      const patientId = role === 'patient' ? currentUser.patient_id : null;
+
+      if (!patientId) return;
+
+      const predictionResponse = await fetch(`http://localhost:5000/api/predictions/patient/${patientId}`);
+      if (predictionResponse.ok) {
+        const predictions = await predictionResponse.json();
+        if (Array.isArray(predictions) && predictions.length > 0) {
+          const predictionsByRecord: Record<string, any> = {};
+          predictions.forEach((prediction: any) => {
+            if (prediction.record_id) {
+              predictionsByRecord[prediction.record_id] = prediction;
+            }
+          });
+
+          const newAnalysisResults: Record<string, any> = {};
+          records.forEach(record => {
+            const prediction = predictionsByRecord[record.id];
+            if (!prediction) return;
+
+            newAnalysisResults[record.id] = {
+              success: true,
+              data: prediction.scores || {},
+              health_score: {
+                score: parseFloat(prediction.final_score) || 50,
+                risk_level: parseFloat(prediction.final_score) >= 70 ? 'low' :
+                           parseFloat(prediction.final_score) >= 50 ? 'moderate' :
+                           parseFloat(prediction.final_score) >= 30 ? 'high' : 'critical',
+                metrics: []
+              },
+              ocr_preview: prediction.scores ? 'Analysis loaded from cache' : 'Analysis loaded from cache'
+            };
+          });
+
+          if (Object.keys(newAnalysisResults).length > 0) {
+            setAnalysisResults(prev => ({ ...prev, ...newAnalysisResults }));
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load existing predictions:", error);
+    }
+  };
+
 
   useEffect(() => {
     const role = localStorage.getItem('userRole');
@@ -34,6 +86,11 @@ const Dashboard = () => {
       try {
         const userRecords = await getCurrentUserRecords();
         setRecords(userRecords);
+        
+        // Load existing predictions after records are loaded
+        if (userRecords.length > 0) {
+          await loadExistingPredictions(userRecords, role);
+        }
       } catch (err) {
         console.error('Error fetching records:', err);
         toast({
@@ -48,6 +105,8 @@ const Dashboard = () => {
     
     fetchRecords();
   }, [getCurrentUserRecords]);
+  
+  
 
   const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}'); // Fetch current user from localStorage
 
@@ -63,7 +122,7 @@ const Dashboard = () => {
   console.log('Filtered Records:', filteredRecords);
 
   const recentRecords = filteredRecords.slice(0, 3);
-  
+
   // File handling functions
   const handleViewFile = (record: MedicalRecord) => {
     if (record.file_name) {
@@ -102,6 +161,152 @@ const Dashboard = () => {
     }
   };
 
+// Place this function inside the Dashboard component, after your existing file handlers
+const analyzeReportForHealth = async (record: MedicalRecord) => {
+  try {
+    if (!record || !record.file_name) return null;
+    // if we've already fetched for this file, return cached result
+    if (analysisResults[record.id]) return analysisResults[record.id];
+
+    // First, check if predictions exist in database
+    try {
+      const predictionResponse = await fetch(`http://localhost:5000/api/predictions/record/${record.id}`);
+      if (predictionResponse.ok) {
+        const predictionData = await predictionResponse.json();
+        if (predictionData && predictionData.length > 0) {
+          // Convert database prediction format to analysis format
+          const latestPrediction = predictionData[0];
+          const analysisData = {
+            success: true,
+            data: latestPrediction.extracted_fields || {},
+            health_score: {
+              score: latestPrediction.prediction === 1 ? Math.random() * 40 + 60 : Math.random() * 60 + 20, // Mock score based on prediction
+              risk_level: latestPrediction.prediction === 1 ? 'high' : 'low',
+              metrics: [] // Could be populated from extracted_fields if available
+            },
+            ocr_preview: latestPrediction.ocr_preview || "Analysis loaded from cache"
+          };
+          setAnalysisResults(prev => ({ ...prev, [record.id]: analysisData }));
+          return analysisData;
+        }
+      }
+    } catch (dbError) {
+      console.log("No cached predictions found, running analysis:", dbError);
+    }
+
+    // If no cached predictions, run the analysis
+    const apiUrl = "http://localhost:8000/analyze"; // Python service - NEW endpoint
+    const payload = { file_url: `http://localhost:5000/uploads/${record.file_name}` };
+
+    // Optional: set loading state for UI indicator
+    setAnalysisLoading(prev => ({ ...prev, [record.id]: true }));
+
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    setAnalysisLoading(prev => ({ ...prev, [record.id]: false }));
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Analysis API error:", text);
+      return null;
+    }
+
+    const data = await res.json();
+
+    // Save the analysis results to database
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+      const patientId = userRole === 'patient' ? currentUser.patient_id : null;
+
+      if (patientId) {
+        const predictionPayload = {
+          patient_id: patientId,
+          record_id: record.id,
+          lab_id: record.lab_id,
+          final_score: data.health_score?.score || 50,
+          scores: data.data || {}
+        };
+
+        await fetch('http://localhost:5000/api/predictions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(predictionPayload)
+        });
+      }
+    } catch (saveError) {
+      console.error("Failed to save prediction to database:", saveError);
+      // Continue anyway - analysis still worked
+    }
+
+    // store by record id
+    setAnalysisResults(prev => ({ ...prev, [record.id]: data }));
+    return data;
+  } catch (err) {
+    console.error("analyzeReportForHealth error:", err);
+    setAnalysisLoading(prev => ({ ...prev, [record.id]: false }));
+    return null;
+  }
+};
+
+  // ---------- AUTO-RUN ANALYSIS USEEFFECT ----------
+  useEffect(() => {
+    if (!filteredRecords || filteredRecords.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      // Only analyze records that don't have cached predictions
+      const toAnalyze = filteredRecords
+        .filter(rec => rec.file_name && !analysisResults[rec.id])
+        .slice(0, 3); // Limit to 3 at a time to avoid overwhelming
+
+      if (toAnalyze.length === 0) return; // All records already have cached predictions
+
+      for (const rec of toAnalyze) {
+        if (cancelled) break;
+        // await each call to avoid overwhelming the service
+        // eslint-disable-next-line no-await-in-loop
+        // @ts-ignore
+        await analyzeReportForHealth(rec);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // We intentionally avoid adding analysisResults to deps to prevent infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredRecords, analysisResults]);
+
+  // Load patient-level prediction data for consistent chart
+  useEffect(() => {
+    if (userRole === 'patient') {
+      const loadPatientData = async () => {
+        try {
+          const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+          const patientId = currentUser.patient_id;
+
+          if (patientId) {
+            const response = await fetch(`http://localhost:5000/api/predictions/patient/${patientId}`);
+            if (response.ok) {
+              const data = await response.json();
+              // Store all predictions as an array for proper chart rendering
+              setPatientPrediction(Array.isArray(data) && data.length > 0 ? data : null);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to load patient prediction:", error);
+        }
+      };
+
+      loadPatientData();
+    }
+  }, [userRole]);
+
   return (
     <>
       <Navbar />
@@ -124,16 +329,10 @@ const Dashboard = () => {
               title="Total Records"
               value={filteredRecords.length.toString()}
               icon={<FileText size={24} className="text-medical-blue" />}
-              trend="up"
-              trendValue={`${filteredRecords.length > 0 ? filteredRecords.length - 3 : 0} new this month`}            />
+              description="All uploaded records"
+            />
             
-            {userRole === 'pathlab' ? (
-              <StatsCard
-                title="Tests Conducted"
-                value={(filteredRecords.filter(r => r.type === 'Laboratory').length).toString()}                icon={<Activity size={24} className="text-medical-blue" />}
-                description="Laboratory tests"
-              />
-            ) : (
+            {userRole === 'pathlab' ? null: (
               <StatsCard
                 title="Last Checkup"
                 value={filteredRecords.length > 0 ? new Date(filteredRecords[0].date).toLocaleDateString() : "None"}
@@ -149,27 +348,13 @@ const Dashboard = () => {
                 icon={<FileText size={24} className="text-medical-blue" />}
                 description="With patients"
               />
-            ) : (
-              <StatsCard
-                title="Health Score"
-                value="92/100"
-                icon={<Activity size={24} className="text-medical-blue" />}
-                trend="up"
-                trendValue="+5 from last visit"
-              />
-            )}
+            ) : null}
             
-            <StatsCard
-              title="Upcoming"
-              value={upcomingAppointments.length.toString()}
-              icon={<Clock size={24} className="text-medical-blue" />}
-              description={userRole === 'pathlab' ? "Patient appointments" : "Scheduled appointments"}
-            />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className={`grid grid-cols-1 ${userRole === 'pathlab' ? 'lg:grid-cols-3' : ''} gap-8`}>
             {/* Recent Medical Records */}
-            <div className="lg:col-span-2">
+            <div className={userRole === 'pathlab' ? 'lg:col-span-2' : ''}>
               <Card className="h-full p-6">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-semibold">
@@ -273,103 +458,44 @@ const Dashboard = () => {
               </Card>
             </div>
             
-            {/* Right side card - different for each role */}
-            <div>
-              <Card className="h-full p-6">
-                {userRole === 'pathlab' ? (
-                  <>
-                    <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-semibold">Patient Activity</h2>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      <motion.div
-                        whileHover={{ x: 3 }}
-                        className="p-4 border border-gray-100 rounded-lg hover:bg-blue-50/50 transition-colors"
-                      >
-                        <h3 className="font-medium text-gray-900">Reports linked to Patient ID</h3>
-                        <div className="mt-3">
-                          {filteredRecords.filter(r => r.patient_id).length > 0 ? (
-                            <div className="space-y-2">
-                              {Array.from(new Set(filteredRecords.filter(r => r.patient_id).map(r => r.patient_id))).map((patientId, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                  <div className="flex items-center">
-                                    <UserRound size={16} className="mr-2 text-medical-blue" />
-                                    <span>Patient ID: {patientId}</span>
-                                  </div>
-                                  <span className="text-sm text-gray-500">
-                                  {filteredRecords.filter(r => r.patient_id === patientId).length} reports
-                                  </span>
+            {userRole === 'pathlab' && (
+              <div>
+                <Card className="h-full p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-semibold">Patient Activity</h2>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <motion.div
+                      whileHover={{ x: 3 }}
+                      className="p-4 border border-gray-100 rounded-lg hover:bg-blue-50/50 transition-colors"
+                    >
+                      <h3 className="font-medium text-gray-900">Reports linked to Patient ID</h3>
+                      <div className="mt-3">
+                        {filteredRecords.filter(r => r.patient_id).length > 0 ? (
+                          <div className="space-y-2">
+                            {Array.from(new Set(filteredRecords.filter(r => r.patient_id).map(r => r.patient_id))).map((patientId, index) => (
+                              <div key={index} className="flex items-center justify-between">
+                                <div className="flex items-center">
+                                  <UserRound size={16} className="mr-2 text-medical-blue" />
+                                  <span>Patient ID: {patientId}</span>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-500">No patients linked yet</p>
-                          )}
-                        </div>
-                      </motion.div>
-                      
-                      <motion.div
-                        whileHover={{ x: 3 }}
-                        className="p-4 border border-gray-100 rounded-lg hover:bg-blue-50/50 transition-colors"
-                      >
-                        <h3 className="font-medium text-gray-900">Recent Activity</h3>
-                        <div className="mt-2 text-sm text-gray-500">
-                          <div className="mt-1">
-                            <span>2 hours ago:</span> Sarah Johnson viewed her lab results
+                                <span className="text-sm text-gray-500">
+                                {filteredRecords.filter(r => r.patient_id === patientId).length} reports
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                          <div className="mt-1">
-                            <span>Yesterday:</span> Michael Smith downloaded his report
-                          </div>
-                        </div>
-                      </motion.div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-semibold">Upcoming Appointments</h2>
-                      <Button variant="ghost" size="sm" className="text-medical-blue">
-                        <Calendar size={16} className="mr-1" /> Add
-                      </Button>
-                    </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">No patients linked yet</p>
+                        )}
+                      </div>
+                    </motion.div>
                     
-                    {upcomingAppointments.length > 0 ? (
-                      <div className="space-y-4">
-                        {upcomingAppointments.map((appointment) => (
-                          <motion.div
-                            key={appointment.id}
-                            whileHover={{ x: 3 }}
-                            className="p-4 border border-gray-100 rounded-lg hover:bg-blue-50/50 transition-colors"
-                          >
-                            <h3 className="font-medium text-gray-900">{appointment.title}</h3>
-                            <div className="mt-2 flex items-center text-sm text-gray-500">
-                              <Calendar size={14} className="mr-1.5" />
-                              <span>{new Date(appointment.date).toLocaleDateString()}</span>
-                              <span className="mx-1">•</span>
-                              <Clock size={14} className="mr-1.5" />
-                              <span>{appointment.time}</span>
-                            </div>
-                            <div className="mt-1 text-sm text-gray-500">
-                              {appointment.doctor}
-                            </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-8 text-center">
-                        <Calendar className="h-12 w-12 text-gray-300 mb-3" />
-                        <h3 className="text-lg font-medium text-gray-900">No upcoming appointments</h3>
-                        <p className="text-sm text-gray-500 mt-1">Schedule your next appointment</p>
-                        <Button className="mt-4 bg-medical-blue hover:bg-blue-700">
-                          <Plus size={16} className="mr-1" /> Add Appointment
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </Card>
-            </div>
+                  </div>
+                </Card>
+              </div>
+            )}
           </div>
           
           {/* Health Insights / Admin Panel based on role */}
@@ -379,24 +505,236 @@ const Dashboard = () => {
                 <h2 className="text-xl font-semibold">
                   {userRole === 'pathlab' ? 'Lab Analytics' : 'Health Insights'}
                 </h2>
-                <Button variant="outline" size="sm" className="text-medical-blue border-medical-blue">
-                  <BarChart size={16} className="mr-1.5" /> View Trends
-                </Button>
+                {userRole === 'pathlab' ? (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="text-medical-blue border-medical-blue"
+                    onClick={() => setLabChartView(prev => prev === 'daily' ? 'monthly' : 'daily')}
+                  >
+                    <BarChartIcon size={16} className="mr-1.5" /> View {labChartView === 'daily' ? 'Monthly' : 'Daily'}
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="text-medical-blue border-medical-blue">
+                    <BarChartIcon size={16} className="mr-1.5" /> View Trends
+                  </Button>
+                )}
               </div>
               
-              <div className="text-center py-12">
-                <div className="inline-flex justify-center items-center p-4 rounded-full bg-medical-lightBlue/50 mb-4">
-                  <Activity size={32} className="text-medical-blue" />
+              {userRole === 'patient' ? (
+                <div>
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium">Health Scores vs Reports</h3>
+                    <p className="text-sm text-gray-600">Track your health scores across all medical reports</p>
+                  </div>
+
+                  {filteredRecords.length === 0 || !patientPrediction ? (
+                    <div className="text-center py-8">
+                      <BarChartIcon className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-1">No Health Data Available</h3>
+                      <p className="text-sm text-gray-500">Upload medical reports to see your health score trends</p>
+                    </div>
+                  ) : (
+                    (() => {
+                      // Create chart data from all records and their predictions
+                      const allPredictions = Array.isArray(patientPrediction) ? patientPrediction : [patientPrediction];
+                      const predictionsByRecord = allPredictions.reduce((acc: Record<string, any>, prediction: any) => {
+                        if (prediction.record_id) {
+                          acc[prediction.record_id] = prediction;
+                        }
+                        return acc;
+                      }, {});
+
+                      const chartData = filteredRecords
+                        .map(record => {
+                          const prediction = predictionsByRecord[record.id];
+                          if (!prediction) return null;
+
+                          return {
+                            date: new Date(record.date).toLocaleDateString(),
+                            score: parseFloat(prediction.final_score) || 50,
+                            risk: parseFloat(prediction.final_score) >= 70 ? 'low' :
+                                 parseFloat(prediction.final_score) >= 50 ? 'moderate' :
+                                 parseFloat(prediction.final_score) >= 30 ? 'high' : 'critical',
+                            title: record.title,
+                            fileName: record.file_name,
+                            fullDate: record.date
+                          };
+                        })
+                        .filter(item => item !== null)
+                        .sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+
+                      if (chartData.length === 0) {
+                        return (
+                          <div className="text-center py-8">
+                            <BarChartIcon className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                            <h3 className="text-lg font-medium text-gray-900 mb-1">No Analysis Data Available</h3>
+                            <p className="text-sm text-gray-500">Your reports are being analyzed</p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="h-80">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis
+                                dataKey="date"
+                                tick={{ fontSize: 12 }}
+                                angle={-45}
+                                textAnchor="end"
+                                height={60}
+                              />
+                              <YAxis
+                                domain={[0, 100]}
+                                tick={{ fontSize: 12 }}
+                                label={{ value: 'Health Score', angle: -90, position: 'insideLeft' }}
+                              />
+                              <Tooltip
+                                content={({ active, payload, label }) => {
+                                  if (active && payload && payload.length) {
+                                    const data = payload[0].payload;
+                                    return (
+                                      <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+                                        <p className="font-medium">{data.title}</p>
+                                        <p className="text-xs text-gray-600 mb-1">{data.fileName}</p>
+                                        <p className="text-sm text-gray-600">{label}</p>
+                                        <p className="text-sm">
+                                          <span className="font-medium">Score: </span>
+                                          <span className={`font-bold ${
+                                            data.risk === 'low' ? 'text-green-600' :
+                                            data.risk === 'moderate' ? 'text-yellow-600' :
+                                            data.risk === 'high' ? 'text-orange-600' :
+                                            data.risk === 'critical' ? 'text-red-600' :
+                                            'text-gray-600'
+                                          }`}>
+                                            {data.score}/100
+                                          </span>
+                                        </p>
+                                        <p className="text-sm capitalize">
+                                          <span className="font-medium">Risk: </span>
+                                          <span className={`${
+                                            data.risk === 'low' ? 'text-green-600' :
+                                            data.risk === 'moderate' ? 'text-yellow-600' :
+                                            data.risk === 'high' ? 'text-orange-600' :
+                                            data.risk === 'critical' ? 'text-red-600' :
+                                            'text-gray-600'
+                                          }`}>
+                                            {data.risk}
+                                          </span>
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                }}
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="score"
+                                stroke="#2563eb"
+                                strokeWidth={3}
+                                dot={{ fill: '#2563eb', strokeWidth: 2, r: 6 }}
+                                activeDot={{ r: 8, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
-                <h3 className="text-xl font-medium text-gray-900 mb-2">
-                  {userRole === 'pathlab' ? 'Lab Analytics Coming Soon' : 'Health Insights Coming Soon'}
-                </h3>
-                <p className="text-gray-600 max-w-md mx-auto">
-                  {userRole === 'pathlab' 
-                    ? 'We\'re working on analytics to help you track lab performance and patient outcomes.'
-                    : 'We\'re working on analyzing your health data to provide personalized insights and recommendations.'}
-                </p>
-              </div>
+              ) : (
+                <div>
+                  <div className="mb-4">
+                    <h3 className="text-lg font-medium">Reports Shared Over Time</h3>
+                    <p className="text-sm text-gray-600">Track the number of reports shared with patients</p>
+                  </div>
+                  
+                  {(() => {
+                    const sharedRecords = filteredRecords.filter(r => r.patient_id);
+                    if (sharedRecords.length === 0) {
+                      return (
+                        <div className="text-center py-8">
+                          <BarChartIcon className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                          <h3 className="text-lg font-medium text-gray-900 mb-1">No Data Available</h3>
+                          <p className="text-sm text-gray-500">Share reports with patients to see analytics</p>
+                        </div>
+                      );
+                    }
+                    
+                    const sortedRecords = [...sharedRecords].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                    const dataMap: Record<string, number> = {};
+                    
+                    sortedRecords.forEach(record => {
+                      const dateObj = new Date(record.date);
+                      let key = '';
+                      if (labChartView === 'daily') {
+                        key = dateObj.toLocaleDateString();
+                      } else {
+                        key = dateObj.toLocaleDateString('default', { month: 'short', year: 'numeric' });
+                      }
+                      
+                      if (!dataMap[key]) {
+                        dataMap[key] = 0;
+                      }
+                      dataMap[key] += 1;
+                    });
+                    
+                    const chartData = Object.keys(dataMap).map(key => ({
+                      date: key,
+                      count: dataMap[key]
+                    }));
+
+                    return (
+                      <div className="h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={chartData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis
+                              dataKey="date"
+                              tick={{ fontSize: 12 }}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis
+                              allowDecimals={false}
+                              tick={{ fontSize: 12 }}
+                              label={{ value: 'Reports Shared', angle: -90, position: 'insideLeft' }}
+                            />
+                            <Tooltip
+                              content={({ active, payload, label }) => {
+                                if (active && payload && payload.length) {
+                                  return (
+                                    <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+                                      <p className="text-sm text-gray-600 mb-1">{label}</p>
+                                      <p className="text-sm">
+                                        <span className="font-medium">Reports Shared: </span>
+                                        <span className="font-bold text-medical-blue">
+                                          {payload[0].value}
+                                        </span>
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              }}
+                            />
+                            <Bar 
+                              dataKey="count" 
+                              fill="#2563eb" 
+                              radius={[4, 4, 0, 0]}
+                              maxBarSize={50}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </Card>
           </div>
         </div>

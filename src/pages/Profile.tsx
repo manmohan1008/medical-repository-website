@@ -25,6 +25,7 @@ import {
   UserCog
 } from 'lucide-react';
 import { Lab, Patient } from '../types/user'; // Adjusted the path to match the relative location
+import { toast } from 'sonner';
 
 const ProfileSetting = ({ icon, title, description, children }) => (
   <div className="flex gap-4 items-start py-6">
@@ -49,11 +50,14 @@ const Profile = () => {
     const formData = new FormData(event.currentTarget);
     const updates = Object.fromEntries(formData.entries());
 
-    // Extract the ID from userData
     const id = isPatient ? (userData as Patient).id : (userData as Lab).id;
 
-    // Pass the ID and updates to updateUserData
-    await updateUserData(id, updates);
+    try {
+      await updateUserData(id, updates);
+      toast.success('Profile updated successfully!');
+    } catch (error) {
+      toast.error('Failed to update profile. Please try again.');
+    }
   };
 
   if (loading) {
@@ -194,22 +198,6 @@ const Profile = () => {
                                 id="allergies"
                                 name="allergies"
                                 defaultValue={patientData.allergies}
-                              />
-                            </div>
-                            <div className="md:col-span-2">
-                              <Label htmlFor="conditions">Medical Conditions</Label>
-                              <Input
-                                id="conditions"
-                                name="conditions"
-                                defaultValue={patientData.conditions}
-                              />
-                            </div>
-                            <div className="md:col-span-2">
-                              <Label htmlFor="medications">Current Medications</Label>
-                              <Input
-                                id="medications"
-                                name="medications"
-                                defaultValue={patientData.medications}
                               />
                             </div>
                           </div>

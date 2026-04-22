@@ -90,7 +90,7 @@ const SignUp = () => {
                       <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
                       <Input
                         id="firstName"
-                        placeholder="John"
+                        placeholder="First Name"
                         required
                         className="pl-10"
                         value={firstName}
@@ -103,7 +103,7 @@ const SignUp = () => {
                     <Label htmlFor="lastName">Last Name</Label>
                     <Input
                       id="lastName"
-                      placeholder="Doe"
+                      placeholder="Last Name"
                       required
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}

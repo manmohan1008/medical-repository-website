@@ -3,34 +3,44 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Lab, Patient } from '../types/user';
 
-export const useUserData = () => {
-  const [userData, setUserData] = useState<Patient | Lab | null>(null);
+export function useUserData() {
+  const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const userRole = localStorage.getItem('userRole');
-  const userId = JSON.parse(localStorage.getItem('currentUser') || '{}').id;
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const userRole = localStorage.getItem('userRole');
+    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const id = userRole === 'patient' ? currentUser.id : currentUser.id;
+
+    async function fetchUserData() {
+      setLoading(true);
       try {
-        const endpoint = userRole === 'patient' ? '/api/patients' : '/api/labs';
-        const response = await axios.get(`${endpoint}/${userId}`);
-        setUserData(response.data);
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-        toast.error('Failed to load user data');
+        if (userRole === 'patient') {
+          const res = await axios.get(`http://localhost:5000/api/patients/${id}`);
+          setUserData(res.data);
+        } else if (userRole === 'pathlab') {
+          const res = await axios.get(`http://localhost:5000/api/labs/${id}`);
+          setUserData(res.data);
+        }
+      } catch (err) {
+        setUserData(null);
       } finally {
         setLoading(false);
       }
-    };
-
-    if (userId) {
-      fetchUserData();
     }
-  }, [userId, userRole]);
 
-  const updateUserData = async (id: number, updates: Record<string, any>) => {
+    if (id) fetchUserData();
+  }, []);
+
+  const updateUserData = async (id, updates) => {
+    const userRole = localStorage.getItem('userRole');
     try {
-      const response = await axios.put(`http://localhost:8080/api/patients/${id}`, updates);
+      let response;
+      if (userRole === 'patient') {
+        response = await axios.put(`http://localhost:5000/api/patients/${id}`, updates);
+      } else if (userRole === 'pathlab') {
+        response = await axios.put(`http://localhost:5000/api/labs/${id}`, updates);
+      }
       return response.data;
     } catch (error) {
       console.error('Error updating user data:', error);
@@ -39,4 +49,4 @@ export const useUserData = () => {
   };
 
   return { userData, loading, updateUserData };
-};
+}
